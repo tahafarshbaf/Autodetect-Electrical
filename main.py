@@ -44,7 +44,7 @@ with header_col1:
         )
 with header_col2:
     st.title("Vision Scan")
-    st.caption(f"Using YOLO model: {MODEL_PATH}")
+    st.caption(f"Detect and count electrical elements")
 
 # ---------------------------
 # Sidebar settings
@@ -152,7 +152,7 @@ if "clipboard_image" in st.session_state:
     images_to_process.append({"name": "clipboard_image.png", "image": st.session_state["clipboard_image"]})
 
 if not images_to_process:
-    st.warning("Please upload an image or read one from the clipboard.")
+    st.warning("No file uploaded.")
 else:
     # ---------------------------
     # Thumbnail preview of all selected images before running detection
@@ -216,6 +216,7 @@ else:
             )
         with export_col2:
             panel_name_input = st.text_input("Panel Name", value="")
+            client_name_input = st.text_input("Client Name (To:)", value="")
             date_input = st.text_input("Date", value="")
 
         if template_file is not None:
@@ -225,6 +226,7 @@ else:
                     class_totals,
                     panel_name=panel_name_input,
                     date=date_input,
+                    client_name=client_name_input,
                 )
                 st.download_button(
                     label="Download Filled Excel Report",
