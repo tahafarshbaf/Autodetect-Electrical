@@ -1,6 +1,7 @@
 import streamlit as st
 from PIL import Image, ImageGrab
 from ultralytics import YOLO
+from excel_export import fill_template
 import io
 import os
 
@@ -200,6 +201,41 @@ else:
         for i, (cls, count) in enumerate(sorted(class_totals.items(), key=lambda x: -x[1])):
             with summary_cols[i % len(summary_cols)]:
                 st.metric(label=cls, value=count)
+
+        # ---------------------------
+        # Export to Excel using the company BOQ template
+        # ---------------------------
+        st.markdown("#### Export to Excel")
+
+        export_col1, export_col2 = st.columns([1, 1])
+        with export_col1:
+            template_file = st.file_uploader(
+                "Upload your Excel template (.xlsx)",
+                type=["xlsx"],
+                key="template_uploader",
+            )
+        with export_col2:
+            panel_name_input = st.text_input("Panel Name", value="")
+            date_input = st.text_input("Date", value="")
+
+        if template_file is not None:
+            try:
+                excel_buffer = fill_template(
+                    template_file,
+                    class_totals,
+                    panel_name=panel_name_input,
+                    date=date_input,
+                )
+                st.download_button(
+                    label="Download Filled Excel Report",
+                    data=excel_buffer,
+                    file_name="detection_report.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            except ValueError as e:
+                st.error(str(e))
+        else:
+            st.info("Upload your Excel template above to enable the export.")
     else:
         st.write("No objects found in any of the selected images.")
 
