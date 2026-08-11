@@ -8,6 +8,7 @@ each block holding up to 30 element rows.
 Import and call fill_template() from app.py.
 """
 
+import re
 from io import BytesIO
 import openpyxl
 
@@ -25,20 +26,36 @@ COL_RANGE = 3         # column C — specification (e.g. 3-Pole / 1-Pole)
 COL_QTY = 8            # column H — quantity
 
 
-def split_class_name(class_name: str, delimiter: str = "_"):
-    """
-    Splits a YOLO class name like 'CB_3Pole' into (element_name, spec).
+# Matches everything before the first digit as the name, and the first
+# digit onward as the spec, e.g. "MCB1P" -> ("MCB", "1P").
+_CLASS_NAME_PATTERN = re.compile(r"^([^\d]+)(\d.*)$")
 
-    Adjust this function if your class naming convention is different,
-    e.g. if the spec comes first, or a different delimiter is used.
+
+def split_class_name(class_name: str):
     """
-    if delimiter in class_name:
-        name, spec = class_name.rsplit(delimiter, 1)
-        return name, spec
+    Splits a YOLO class name into (element_name, spec), where everything
+    before the first digit is the element name and the first digit
+    onward is the spec.
+
+    Examples:
+        "MCB1P"       -> ("MCB", "1P")
+        "Contactor3P" -> ("Contactor", "3P")
+        "Relay"       -> ("Relay", "")   # no digit found
+    """
+    match = _CLASS_NAME_PATTERN.match(class_name)
+    if match:
+        name, spec = match.group(1), match.group(2)
+        return name.strip(), spec.strip()
     return class_name, ""
 
 
-def fill_template(template_file, class_totals: dict, panel_name: str = "", date: str = ""):
+def fill_template(
+    template_file,
+    class_totals: dict,
+    panel_name: str = "",
+    date: str = "",
+    client_name: str = "",
+):
     """
     Fills the BOQ template with detection results.
 
@@ -49,6 +66,8 @@ def fill_template(template_file, class_totals: dict, panel_name: str = "", date:
                        {"CB_3Pole": 12, "CB_1Pole": 8, ...}
         panel_name: optional text to write into the "Panel Name" field.
         date: optional text to write into the "Date" field.
+        client_name: optional text to write into the "To: Client" field
+                     (the "به: شركت" field in the template).
 
     Returns:
         A BytesIO object containing the filled .xlsx file, ready for download.
@@ -84,6 +103,8 @@ def fill_template(template_file, class_totals: dict, panel_name: str = "", date:
             ws.cell(row=block_start_row + 1, column=1).value = f"Panel Name: {panel_name}"
         if date:
             ws.cell(row=block_start_row, column=1).value = f"Date : {date}"
+        if client_name:
+            ws.cell(row=block_start_row + 1, column=8).value = f"به : {client_name}"
 
         for row_offset in range(DATA_ROWS_PER_BLOCK):
             if item_index >= len(items):
