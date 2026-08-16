@@ -2,6 +2,7 @@ import streamlit as st
 from PIL import Image, ImageGrab
 from ultralytics import YOLO
 from excel_export import fill_template
+import pandas as pd
 import io
 import os
 
@@ -172,7 +173,6 @@ else:
     # ---------------------------
     progress_bar = st.progress(0, text="Starting detection...")
     all_results = []
-    class_totals = {}  # class name -> total count across all images
 
     for idx, item in enumerate(images_to_process):
         progress_bar.progress(
@@ -184,15 +184,91 @@ else:
         result_image, detections = run_detection(image, confidence_threshold)
         all_results.append({"name": item["name"], "image": image, "result_image": result_image, "detections": detections})
 
-        for d in detections:
-            class_totals[d["class"]] = class_totals.get(d["class"], 0) + 1
-
     progress_bar.progress(1.0, text="Detection complete.")
     progress_bar.empty()
 
+    st.markdown("---")
+
     # ---------------------------
-    # Summary of detections across all images
+    # Per-image results with an editable class/count table
     # ---------------------------
+    st.markdown("#### Results (edit class names or counts if needed)")
+
+    edited_counts_per_image = []
+
+    for idx, item in enumerate(all_results):
+        st.markdown(f"### Image {idx + 1}: {item['name']}")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.image(item["image"], caption="Original Image", use_container_width=True)
+        with col2:
+            st.image(item["result_image"], caption="Detection Result", use_container_width=True)
+
+        # Build the initial class -> count table from raw detections
+        initial_counts = {}
+        for d in item["detections"]:
+            initial_counts[d["class"]] = initial_counts.get(d["class"], 0) + 1
+
+        initial_rows = [
+            {"Class": cls, "Count": count}
+            for cls, count in sorted(initial_counts.items(), key=lambda x: -x[1])
+        ]
+        initial_df = pd.DataFrame(initial_rows, columns=["Class", "Count"])
+
+        editor_key = f"editor_{idx}_{item['name']}"
+
+        col_edit, col_reset = st.columns([5, 1])
+        with col_edit:
+            st.markdown("**Detected Objects** (editable — fix class names or counts, add/remove rows as needed):")
+        with col_reset:
+            if st.button("Reset", key=f"reset_{editor_key}"):
+                if editor_key in st.session_state:
+                    del st.session_state[editor_key]
+                st.rerun()
+
+        edited_df = st.data_editor(
+            initial_df,
+            key=editor_key,
+            num_rows="dynamic",
+            use_container_width=True,
+            column_config={
+                "Class": st.column_config.TextColumn("Class", required=True),
+                "Count": st.column_config.NumberColumn("Count", min_value=0, step=1, required=True),
+            },
+        )
+
+        # Convert the edited table back into a class -> count dict for this image
+        image_counts = {}
+        for _, row in edited_df.iterrows():
+            cls = str(row.get("Class", "")).strip()
+            count = row.get("Count", 0)
+            if cls and pd.notna(count) and count > 0:
+                image_counts[cls] = image_counts.get(cls, 0) + int(count)
+
+        edited_counts_per_image.append(image_counts)
+
+        # Download button for result image
+        buf = io.BytesIO()
+        item["result_image"].save(buf, format="PNG")
+        st.download_button(
+            label="Download Result Image",
+            data=buf.getvalue(),
+            file_name=f"result_{item['name']}",
+            mime="image/png",
+            key=f"download_{idx}",
+        )
+
+        st.markdown("---")
+
+    # ---------------------------
+    # Summary across all images, based on the EDITED counts
+    # ---------------------------
+    class_totals = {}
+    for image_counts in edited_counts_per_image:
+        for cls, count in image_counts.items():
+            class_totals[cls] = class_totals.get(cls, 0) + count
+
     st.markdown("#### Summary Across All Images")
     total_objects = sum(class_totals.values())
     if class_totals:
@@ -240,39 +316,3 @@ else:
             st.info("Upload your Excel template above to enable the export.")
     else:
         st.write("No objects found in any of the selected images.")
-
-    st.markdown("---")
-
-    # ---------------------------
-    # Per-image results
-    # ---------------------------
-    for idx, item in enumerate(all_results):
-        st.markdown(f"### Image {idx + 1}: {item['name']}")
-
-        col1, col2 = st.columns(2)
-        with col1:
-            st.image(item["image"], caption="Original Image", use_container_width=True)
-        with col2:
-            st.image(item["result_image"], caption="Detection Result", use_container_width=True)
-
-        # Detected objects list
-        detections = item["detections"]
-        if detections:
-            st.markdown("**Detected Objects:**")
-            for d in detections:
-                st.write(f"- {d['class']}  —  confidence: {d['confidence'] * 100:.1f}%")
-        else:
-            st.write("No objects found above this confidence threshold.")
-
-        # Download button for result image
-        buf = io.BytesIO()
-        item["result_image"].save(buf, format="PNG")
-        st.download_button(
-            label="Download Result Image",
-            data=buf.getvalue(),
-            file_name=f"result_{item['name']}",
-            mime="image/png",
-            key=f"download_{idx}",
-        )
-
-        st.markdown("---")
