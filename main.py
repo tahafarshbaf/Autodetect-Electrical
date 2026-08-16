@@ -3,8 +3,71 @@ from PIL import Image, ImageGrab
 from ultralytics import YOLO
 from excel_export import fill_template
 import pandas as pd
+import datetime
 import io
 import os
+
+
+def gregorian_to_jalali(g_year, g_month, g_day):
+    """
+    Converts a Gregorian date to the Jalali (Shamsi/Persian) calendar.
+    Pure Python implementation — no internet or external library needed.
+    Returns (jalali_year, jalali_month, jalali_day).
+    """
+    g_days_in_month = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    j_days_in_month = [31, 31, 31, 31, 31, 31, 30, 30, 30, 30, 30, 29]
+
+    gy = g_year - 1600
+    gm = g_month - 1
+    gd = g_day - 1
+
+    g_day_no = 365 * gy + (gy + 3) // 4 - (gy + 99) // 100 + (gy + 399) // 400
+    for i in range(gm):
+        g_day_no += g_days_in_month[i]
+    if gm > 1 and ((g_year % 4 == 0 and g_year % 100 != 0) or (g_year % 400 == 0)):
+        g_day_no += 1
+    g_day_no += gd
+
+    j_day_no = g_day_no - 79
+
+    j_np = j_day_no // 12053
+    j_day_no %= 12053
+
+    jy = 979 + 33 * j_np + 4 * (j_day_no // 1461)
+    j_day_no %= 1461
+
+    if j_day_no >= 366:
+        jy += (j_day_no - 1) // 365
+        j_day_no = (j_day_no - 1) % 365
+
+    for i in range(11):
+        if j_day_no < j_days_in_month[i]:
+            jm = i + 1
+            jd = j_day_no + 1
+            break
+        j_day_no -= j_days_in_month[i]
+    else:
+        jm = 12
+        jd = j_day_no + 1
+
+    return jy, jm, jd
+
+
+def today_jalali_string():
+    """Returns today's date in Jalali calendar as 'YYYY/MM/DD'."""
+    today = datetime.date.today()
+    jy, jm, jd = gregorian_to_jalali(today.year, today.month, today.day)
+    return f"{jy:04d}/{jm:02d}/{jd:02d}"
+
+
+def _set_today_jalali_date():
+    """
+    Callback for the 'Today (Shamsi)' button. Callbacks run BEFORE the
+    script reruns and the widget is re-instantiated, so it's safe to
+    write to st.session_state here (unlike doing it after the widget
+    with the same key has already been created in the current run).
+    """
+    st.session_state["date_input_value"] = today_jalali_string()
 
 st.set_page_config(page_title="Vision Scan", layout="wide")
 
@@ -292,8 +355,13 @@ else:
             )
         with export_col2:
             panel_name_input = st.text_input("Panel Name", value="")
-            client_name_input = st.text_input("Client Name (To:)", value="")
-            date_input = st.text_input("Date", value="")
+            client_name_input = st.text_input("Client Name", value="")
+
+            if "date_input_value" not in st.session_state:
+                st.session_state["date_input_value"] = ""
+
+            date_input = st.text_input("Date", key="date_input_value")
+            st.button("Today", on_click=_set_today_jalali_date)
 
         if template_file is not None:
             try:

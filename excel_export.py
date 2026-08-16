@@ -26,6 +26,29 @@ COL_RANGE = 3         # column C — specification (e.g. 3-Pole / 1-Pole)
 COL_QTY = 8            # column H — quantity
 
 
+# ---------------------------------------------------------------------------
+# Priority order for the Excel output.
+#
+# Element names (the part before the first digit, e.g. "MCB" from "MCB1P")
+# listed here appear FIRST in the Excel file, in this exact order —
+# regardless of the order they were detected in the images.
+#
+# Any element name NOT in this list is placed after all listed ones,
+# sorted alphabetically among themselves.
+#
+# Edit this list to match your own priority order. Matching is
+# case-insensitive.
+# ---------------------------------------------------------------------------
+CLASS_PRIORITY_ORDER = [
+    "MCCB",
+    "MCB",
+    "Contactor",
+    "RCD",
+    "Relay",
+    "Fuse",
+]
+
+
 # Matches everything before the first digit as the name, and the first
 # digit onward as the spec, e.g. "MCB1P" -> ("MCB", "1P").
 _CLASS_NAME_PATTERN = re.compile(r"^([^\d]+)(\d.*)$")
@@ -47,6 +70,23 @@ def split_class_name(class_name: str):
         name, spec = match.group(1), match.group(2)
         return name.strip(), spec.strip()
     return class_name, ""
+
+
+def _priority_sort_key(class_name: str):
+    """
+    Sort key that places element names according to CLASS_PRIORITY_ORDER
+    first (in that exact order), and any unlisted element names after,
+    sorted alphabetically. Ties within the same element name are broken
+    alphabetically by the full class name (so e.g. MCB1P sorts before MCB3P).
+    """
+    element_name, _ = split_class_name(class_name)
+    element_name_upper = element_name.upper()
+
+    priority_lookup = {name.upper(): i for i, name in enumerate(CLASS_PRIORITY_ORDER)}
+
+    if element_name_upper in priority_lookup:
+        return (0, priority_lookup[element_name_upper], class_name)
+    return (1, element_name_upper, class_name)
 
 
 def fill_template(
@@ -79,9 +119,9 @@ def fill_template(
     wb = openpyxl.load_workbook(template_file)
     ws = wb.active
 
-    # Keep results sorted by count (highest first); change to
-    # sorted(class_totals.items()) for alphabetical order instead.
-    items = sorted(class_totals.items(), key=lambda x: -x[1])
+    # Sort by the priority list defined above (CLASS_PRIORITY_ORDER), not by
+    # detection order or count.
+    items = sorted(class_totals.items(), key=lambda x: _priority_sort_key(x[0]))
 
     total_blocks_available = _count_available_blocks(ws)
     blocks_needed = max(1, -(-len(items) // DATA_ROWS_PER_BLOCK))  # ceil division
