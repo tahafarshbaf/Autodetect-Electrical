@@ -17,9 +17,9 @@ import time
 from paddleocr import PaddleOCR
 
 # ==== EDIT THIS ====
-IMAGE_PATH = r"C:\Users\Azar Fonoon\desktop\ocr_test6.png"
+IMAGE_PATH = r"C:\Users\Azar Fonoon\Desktop\test7.png"
 LANG = "en"
-CONFIDENCE_THRESHOLD = 0.95  # only keep results with confidence >= this value (0.0 - 1.0)
+CONFIDENCE_THRESHOLD = 0.35  # only keep results with confidence >= this value (0.0 - 1.0)
 # ====================
 
 

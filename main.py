@@ -1,7 +1,7 @@
 import streamlit as st
 from PIL import Image, ImageGrab
 from ultralytics import YOLO
-from excel_export import fill_template
+from excel_export import fill_template, count_pages_in_template
 import pandas as pd
 import datetime
 import io
@@ -355,22 +355,39 @@ else:
             )
         with export_col2:
             panel_name_input = st.text_input("Panel Name", value="")
-            client_name_input = st.text_input("Client Name", value="")
+            client_name_input = st.text_input("Client Name (To:)", value="")
 
             if "date_input_value" not in st.session_state:
                 st.session_state["date_input_value"] = ""
 
             date_input = st.text_input("Date", key="date_input_value")
-            st.button("Today", on_click=_set_today_jalali_date)
+            st.button("Fill Today's Date (Shamsi)", on_click=_set_today_jalali_date)
+
+            page_number_input = 1
+            if template_file is not None:
+                try:
+                    total_pages = count_pages_in_template(template_file)
+                    template_file.seek(0)  # reset read position after inspecting it
+                    page_number_input = st.number_input(
+                        f"Page Number (this template has {total_pages} page(s))",
+                        min_value=1,
+                        max_value=total_pages,
+                        value=1,
+                        step=1,
+                    )
+                except Exception as e:
+                    st.error(f"Could not read the template's page count: {e}")
 
         if template_file is not None:
             try:
+                template_file.seek(0)  # reset again since it was read above
                 excel_buffer = fill_template(
                     template_file,
                     class_totals,
                     panel_name=panel_name_input,
                     date=date_input,
                     client_name=client_name_input,
+                    start_page=page_number_input,
                 )
                 st.download_button(
                     label="Download Filled Excel Report",

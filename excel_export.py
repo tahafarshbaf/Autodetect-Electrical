@@ -95,6 +95,7 @@ def fill_template(
     panel_name: str = "",
     date: str = "",
     client_name: str = "",
+    start_page: int = 1,
 ):
     """
     Fills the BOQ template with detection results.
@@ -108,13 +109,19 @@ def fill_template(
         date: optional text to write into the "Date" field.
         client_name: optional text to write into the "To: Client" field
                      (the "به: شركت" field in the template).
+        start_page: which page (1-indexed) to start writing into. Page 1 is
+                    the first block (rows 1-41), page 2 is the second
+                    (rows 42-82), and so on. If there are more element
+                    types than fit on one page, writing continues onto
+                    the following page(s).
 
     Returns:
         A BytesIO object containing the filled .xlsx file, ready for download.
 
     Raises:
-        ValueError: if there are more distinct element types than the
-                    template has blocks/rows available for.
+        ValueError: if start_page is out of range, or if there are more
+                    distinct element types than the remaining pages in the
+                    template can hold.
     """
     wb = openpyxl.load_workbook(template_file)
     ws = wb.active
@@ -123,28 +130,39 @@ def fill_template(
     # detection order or count.
     items = sorted(class_totals.items(), key=lambda x: _priority_sort_key(x[0]))
 
-    total_blocks_available = _count_available_blocks(ws)
-    blocks_needed = max(1, -(-len(items) // DATA_ROWS_PER_BLOCK))  # ceil division
+    total_pages_available = count_available_blocks(ws)
 
-    if blocks_needed > total_blocks_available:
+    if start_page < 1 or start_page > total_pages_available:
         raise ValueError(
-            f"Not enough blocks in the template: {len(items)} element types need "
-            f"{blocks_needed} block(s) of {DATA_ROWS_PER_BLOCK} rows each, but the "
-            f"template only has {total_blocks_available} block(s)."
+            f"Invalid page number: {start_page}. This template has "
+            f"{total_pages_available} page(s), so start_page must be "
+            f"between 1 and {total_pages_available}."
+        )
+
+    pages_needed = max(1, -(-len(items) // DATA_ROWS_PER_BLOCK))  # ceil division
+    last_page_used = start_page + pages_needed - 1
+
+    if last_page_used > total_pages_available:
+        raise ValueError(
+            f"Not enough pages left in the template: {len(items)} element types "
+            f"need {pages_needed} page(s) of {DATA_ROWS_PER_BLOCK} rows each, "
+            f"starting from page {start_page} that would require pages up to "
+            f"{last_page_used}, but the template only has {total_pages_available} "
+            f"page(s) in total."
         )
 
     item_index = 0
-    for block_num in range(blocks_needed):
-        block_start_row = 1 + block_num * BLOCK_HEIGHT
-        header_row = block_start_row + HEADER_OFFSET
-        data_start_row = block_start_row + DATA_START_OFFSET
+    for page_offset in range(pages_needed):
+        page_number = start_page + page_offset
+        page_start_row = block_start_row(page_number)
+        data_start_row = page_start_row + DATA_START_OFFSET
 
         if panel_name:
-            ws.cell(row=block_start_row + 1, column=1).value = f"Panel Name: {panel_name}"
+            ws.cell(row=page_start_row + 1, column=1).value = f"Panel Name: {panel_name}"
         if date:
-            ws.cell(row=block_start_row, column=1).value = f"Date : {date}"
+            ws.cell(row=page_start_row, column=1).value = f"Date : {date}"
         if client_name:
-            ws.cell(row=block_start_row + 1, column=8).value = f"به : {client_name}"
+            ws.cell(row=page_start_row + 1, column=8).value = f"به : {client_name}"
 
         for row_offset in range(DATA_ROWS_PER_BLOCK):
             if item_index >= len(items):
@@ -166,9 +184,9 @@ def fill_template(
     return output
 
 
-def _count_available_blocks(ws):
-    """Counts how many repeating blocks exist in the template by scanning
-    for 'ITEM' header cells in column A."""
+def count_available_blocks(ws):
+    """Counts how many repeating blocks (pages) exist in the template by
+    scanning for 'ITEM' header cells in column A."""
     count = 0
     row = 5
     while row <= ws.max_row:
@@ -176,3 +194,22 @@ def _count_available_blocks(ws):
             count += 1
         row += BLOCK_HEIGHT
     return count
+
+
+def count_pages_in_template(template_file):
+    """
+    Convenience function: opens the template and returns how many pages
+    (panel blocks) it contains, without modifying anything.
+    Useful for showing the user "Page 1 to N" in the UI.
+    """
+    wb = openpyxl.load_workbook(template_file, read_only=True)
+    ws = wb.active
+    return count_available_blocks(ws)
+
+
+def block_start_row(page_number: int) -> int:
+    """
+    Returns the row number where the given page (1-indexed) starts.
+    E.g. page 1 starts at row 1, page 2 at row 42, page 3 at row 83, etc.
+    """
+    return 1 + (page_number - 1) * BLOCK_HEIGHT
