@@ -50,12 +50,7 @@ with col_a:
 with col_b:
     st.markdown("**Method 2: Read from Clipboard**")
     st.caption("First copy an image (e.g. via Print Screen or copying a file), then click the button below.")
-    st.warning(
-        "Note: this button reads the clipboard of the machine running the "
-        "server, not your own clipboard if you're connecting from another "
-        "computer on the network. This option only works correctly when you "
-        "are using the app on the same machine as the server."
-    )
+
     if st.button("Read Latest Image from Clipboard"):
         clipboard_image = get_clipboard_image()
         if clipboard_image is not None:

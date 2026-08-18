@@ -39,8 +39,8 @@ try:
     print(" File generated successfully at:", output_path)
 
 except FileNotFoundError as e:
-    print(f" Error: {e}")
+    print(f"Error: {e}")
 except PermissionError:
-    print(f" Permission denied: Cannot write to {output_path}")
+    print(f"Permission denied: Cannot write to {output_path}")
 except Exception as e:
-    print(f" Unexpected error: {e}")
+    print(f"Unexpected error: {e}")

@@ -14,13 +14,13 @@ across the top).
 
 import streamlit as st
 
-st.set_page_config(page_title="Vision Scan", layout="wide")
+st.set_page_config(page_title="Autodetect Electrical", layout="wide")
 
 pg = st.navigation(
     [
-        st.Page("views/detection.py", title="Detection", icon="🔍", default=True),
-        st.Page("views/terminal.py", title="Terminal", icon="🔌"),
-        st.Page("views/export.py", title="Export", icon="📊"),
+        st.Page("views/detection.py", title="Detection", icon="1️⃣", default=True),
+        st.Page("views/terminal.py", title="Terminal", icon="2️⃣"),
+        st.Page("views/export.py", title="Export", icon="3️⃣"),
     ],
     position="top",
 )

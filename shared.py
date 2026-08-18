@@ -201,5 +201,5 @@ def render_header(subtitle: str):
                 unsafe_allow_html=True,
             )
     with header_col2:
-        st.title("Vision Scan")
+        st.title("Autodetect Electrical")
         st.caption(subtitle)

@@ -73,9 +73,9 @@ with info_col1:
     client_name_input = st.text_input("Client Name (To:)", value="")
 with info_col2:
     project_type_input = st.text_input(
-        "Project Type (نوع پروژه)",
+        "Project Type",
         value="",
-        placeholder="e.g. تابلو, بدنه تابلو برق توکار, باسداکت ...",
+        placeholder="e.g. Tableau, Busduct, etc.",
         key="pr_project_type",
     )
 
