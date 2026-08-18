@@ -1,7 +1,7 @@
 import streamlit as st
 from PIL import Image, ImageGrab
 from ultralytics import YOLO
-from excel_export import fill_template, count_pages_in_template
+from views.excel_export import fill_template, count_pages_in_template
 from terminal_calc import get_terminal_size, WIRE_SIZE_TABLE
 from cable_ocr import build_ocr_engine, extract_wire_counts_from_images
 import pandas as pd
