@@ -1,8 +1,8 @@
-# Vision Scan
+# Autodetect Electrical
 
 An intelligent electrical equipment detection and analysis system powered by YOLO object detection and Streamlit. Vision Scan automatically detects, counts, and generates detailed reports of electrical components in panel images.
 
-## 🎯 Features
+## Features
 
 - **Real-time Object Detection**: Uses YOLO v8 to detect electrical components (MCBs, Contactors, Relays, etc.)
 - **Multiple Input Methods**: Upload images or paste from clipboard
@@ -12,7 +12,7 @@ An intelligent electrical equipment detection and analysis system powered by YOL
 - **OCR Support**: Optional text extraction from images using PaddleOCR
 - **Batch File Renaming**: Utility to organize image files systematically
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 - Python 3.8+
@@ -22,7 +22,7 @@ An intelligent electrical equipment detection and analysis system powered by YOL
 
 1. **Clone the repository**
    ```bash
-   git clone <repository-url>
+   git clone <https://github.com/tahafarshbaf/autodetect-electrical>
    cd visionscan
    ```
 
@@ -38,49 +38,60 @@ An intelligent electrical equipment detection and analysis system powered by YOL
    ```
 
 4. **Download YOLO model weights**
-   - Place your trained YOLO model at the path specified in `main.py` (or use a pretrained model like `yolov8n.pt`)
-   - Update `MODEL_PATH` in `main.py` with your model location
+   - Place your trained YOLO model at the path specified in `shared.py` (or use a pretrained model like `yolov8n.pt`)
+   - Update `MODEL_PATH` in `shared.py` with your model location
 
 ### Running the Application
 
 ```bash
-streamlit run main.py
+streamlit run app.py
 ```
 
 The app will open at `http://localhost:8501`
 
-## 📋 Project Structure
+## Project Structure
 
 ```
 visionscan/
-├── main.py              # Main Streamlit application
-├── OCR.py               # PaddleOCR text extraction module
-├── excel_export.py      # Excel report generation & BOQ template filling
-├── file_renamer.py      # Batch file renaming utility
-├── requirements.txt     # Python dependencies
+├── app.py                    # Streamlit entry point and page navigation
+├── views/
+│   ├── detection.py         # Image detection page
+│   ├── terminal.py          # Terminal calculation page
+│   ├── export.py            # Proposal and report export page
+│   └── excel_export.py      # Excel report generation and BOQ filling
+├── shared.py                # Shared model, clipboard, and UI helpers
+├── cable_ocr.py             # Cable OCR utilities
+├── terminal_calc.py         # Terminal sizing calculations
+├── panel_price.py           # Panel price lookup
+├── pr_tracker.py            # Proposal tracking
+├── tfp_generator.py         # Proposal document generation
+├── OCR.py                   # Standalone PaddleOCR utility
+├── file_renamer.py          # Batch file renaming utility
+├── requirements.txt         # Python dependencies
 ├── LICENSE
-└── README.md           # This file
+└── README.md                # This file
 ```
 
-## 🔧 Configuration
+## Configuration
 
-### main.py
+### shared.py
 - `LOGO_PATH`: Path to your company logo (PNG/JPG)
-- `MODEL_PATH`: Path to your YOLO model weights
-- `confidence_threshold`: Detection confidence level (0.0-1.0)
+- `MODEL_PATH`: Path to your YOLO model weights in `shared.py`
+- `PR_FILE_PATH`: Path to the proposal tracking workbook
+- `confidence_threshold`: Detection confidence level (0.0-1.0), configured on the Detection page
 
 ### OCR.py
 - `IMAGE_PATH`: Image file to process
 - `LANG`: Language for text detection (e.g., "en", "ch")
 - `CONFIDENCE_THRESHOLD`: OCR confidence cutoff (0.0-1.0)
 
-### excel_export.py
+### views/excel_export.py
 Configurable BOQ template structure:
 - `BLOCK_HEIGHT`: Rows between panel blocks (default: 41)
 - `DATA_ROWS_PER_BLOCK`: Element rows per panel (default: 30)
 - `COL_DESCRIPTION`, `COL_RANGE`, `COL_QTY`: Column mappings
 
-## 📖 Usage Guide
+## Usage Guide
 
 ### Detection & Analysis
 1. Open the Streamlit app
@@ -103,7 +114,7 @@ python OCR.py
 ```
 Edit `IMAGE_PATH` and `LANG` in the script, then run to extract text.
 
-## 🎨 Supported Electrical Components
+## Supported Electrical Components
 
 The model is trained to detect:
 - **MCB** (Miniature Circuit Breaker) - 1P, 2P, 3P, 4P
@@ -111,7 +122,7 @@ The model is trained to detect:
 - **Relay** - Various types
 - *Add your custom classes based on your trained model*
 
-## 📊 Excel Export Format
+## Excel Export Format
 
 Detections are exported into a structured Excel template with:
 - **Component Description**: Element type (MCB, Contactor, etc.)
@@ -119,19 +130,19 @@ Detections are exported into a structured Excel template with:
 - **Quantity**: Count of detected items
 - **Organized by Panel**: Multiple panels per worksheet
 
-## 🛠️ Development
+## Development
 
 ### Adding Custom Classes
 1. Train your YOLO model with additional classes
 2. Update class names in your model weights file
-3. Update `excel_export.py` if new naming conventions are needed
+3. Update `views/excel_export.py` if new naming conventions are needed
 
 ### Extending the App
-- Modify `run_detection()` in `main.py` to add post-processing
+- Modify `run_detection()` in `shared.py` to add post-processing
 - Add filters or analytics to the export function
 - Integrate with external reporting systems
 
-## ⚙️ Requirements
+## Requirements
 
 See `requirements.txt` for all dependencies:
 - streamlit
@@ -142,24 +153,20 @@ See `requirements.txt` for all dependencies:
 - paddleocr
 - paddlepaddle
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
-| Model not found | Check `MODEL_PATH` in `main.py` |
+| Model not found | Check `MODEL_PATH` in `shared.py` |
 | Clipboard paste fails | Ensure app runs on same machine as server |
 | OCR not working | Run `pip install paddlepaddle paddleocr` |
 | Low detection accuracy | Adjust `confidence_threshold` or retrain model |
 | Slow inference | Use smaller YOLO model (e.g., `yolov8n.pt`) or GPU |
 
-## 📄 License
+## License
 
 See [LICENSE](LICENSE) for details.
 
-## 👤 Author
+## Author
 
-Developed for electrical panel analysis and documentation.
-
-## NAMES
-1) Panel Scope
-2) AutoDetect Electrical
+@tahafarshbaf
