@@ -169,4 +169,6 @@ See [LICENSE](LICENSE) for details.
 
 ## Author
 
-@tahafarshbaf
+[@tahafarshbf](https://github.com/tahafarshbaf)
+
+
