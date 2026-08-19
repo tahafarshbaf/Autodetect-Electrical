@@ -10,11 +10,11 @@ helpers stay consistent everywhere.
 """
 
 import os
-import datetime
 
 import streamlit as st
 from PIL import Image, ImageGrab
 from ultralytics import YOLO
+from persiantools.jdatetime import JalaliDate
 
 from cable_ocr import build_ocr_engine
 
@@ -120,67 +120,26 @@ def get_clipboard_image():
 
 # ---------------------------------------------------------------------------
 # Jalali (Shamsi) date helpers (used by the Export page)
+#
+# Both of these used to be backed by a hand-rolled gregorian_to_jalali()
+# conversion. That's now replaced with persiantools.jdatetime.JalaliDate
+# — the same library tfp_generator.py / TFP.py already use for the
+# price-to-Persian-words conversion — so date handling is consistent
+# across the whole app instead of split between a custom implementation
+# and a library.
 # ---------------------------------------------------------------------------
-def gregorian_to_jalali(g_year, g_month, g_day):
-    """
-    Converts a Gregorian date to the Jalali (Shamsi/Persian) calendar.
-    Pure Python implementation — no internet or external library needed.
-    Returns (jalali_year, jalali_month, jalali_day).
-    """
-    g_days_in_month = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    j_days_in_month = [31, 31, 31, 31, 31, 31, 30, 30, 30, 30, 30, 29]
-
-    gy = g_year - 1600
-    gm = g_month - 1
-    gd = g_day - 1
-
-    g_day_no = 365 * gy + (gy + 3) // 4 - (gy + 99) // 100 + (gy + 399) // 400
-    for i in range(gm):
-        g_day_no += g_days_in_month[i]
-    if gm > 1 and ((g_year % 4 == 0 and g_year % 100 != 0) or (g_year % 400 == 0)):
-        g_day_no += 1
-    g_day_no += gd
-
-    j_day_no = g_day_no - 79
-
-    j_np = j_day_no // 12053
-    j_day_no %= 12053
-
-    jy = 979 + 33 * j_np + 4 * (j_day_no // 1461)
-    j_day_no %= 1461
-
-    if j_day_no >= 366:
-        jy += (j_day_no - 1) // 365
-        j_day_no = (j_day_no - 1) % 365
-
-    for i in range(11):
-        if j_day_no < j_days_in_month[i]:
-            jm = i + 1
-            jd = j_day_no + 1
-            break
-        j_day_no -= j_days_in_month[i]
-    else:
-        jm = 12
-        jd = j_day_no + 1
-
-    return jy, jm, jd
-
-
 def today_jalali_year() -> str:
     """Returns just today's Jalali year, e.g. '1405'. Used to build the
     DRAW NO field (e.g. 'DRAW NO: 1405-92')."""
-    today = datetime.date.today()
-    jy, _, _ = gregorian_to_jalali(today.year, today.month, today.day)
-    return f"{jy:04d}"
+    return f"{JalaliDate.today().year:04d}"
 
 
 def today_jalali_string(separator: str = "/"):
     """Returns today's date in Jalali calendar as 'YYYY<sep>MM<sep>DD'.
     Defaults to '/' (used by the BOQ template's date field); pass '-' for
     the PR tracking file, which uses dash-separated dates."""
-    today = datetime.date.today()
-    jy, jm, jd = gregorian_to_jalali(today.year, today.month, today.day)
-    return f"{jy:04d}{separator}{jm:02d}{separator}{jd:02d}"
+    today = JalaliDate.today()
+    return f"{today.year:04d}{separator}{today.month:02d}{separator}{today.day:02d}"
 
 
 # ---------------------------------------------------------------------------

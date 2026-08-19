@@ -1,7 +1,7 @@
 """
 Export page.
 
-Two independent but connected actions:
+Three connected actions:
 
 1. Add Entry to PR Tracking File — appends a new row to the company's PR
    (Price Request) tracking file on disk (PR_FILE_PATH in shared.py).
@@ -12,6 +12,13 @@ Two independent but connected actions:
    (st.session_state["terminal_results"]) and writes them into the
    company's BOQ template, including a "DRAW NO: <year>-<PR number>"
    field built from the PR number above.
+
+3. Generate Word Proposal (TFP) — fills a Word proposal template
+   (uploaded fresh from the UI, like the Excel template) using
+   docxtpl, reusing the Client Name / Project Type / Date / PR Number
+   fields already collected above, plus a price and panel count read
+   from a separately-uploaded "panel price" Excel file
+   (panel_price.py).
 
 Terminal results are merged into the same class_totals dict that
 excel_export.fill_template() already understands, using a naming
@@ -28,6 +35,8 @@ import streamlit as st
 
 from views.excel_export import fill_template, count_pages_in_template
 from pr_tracker import add_pr_entry
+from panel_price import read_panel_price
+from tfp_generator import generate_proposal
 from shared import today_jalali_string, today_jalali_year, render_header, PR_FILE_PATH
 
 render_header("Get a PR code and export all results to the Excel BOQ template")
@@ -61,8 +70,8 @@ with recap_col2:
         st.caption("No terminal-calculation results yet — visit the Terminal page first.")
 
 # ---------------------------------------------------------------------------
-# Shared Panel / Client / Date info, used by both the PR entry and the
-# Excel export below.
+# Shared Panel / Client / Date info, used by the PR entry, the Excel
+# export, and the Word proposal below.
 # ---------------------------------------------------------------------------
 st.markdown("---")
 st.markdown("#### Project Info")
@@ -70,7 +79,7 @@ st.markdown("#### Project Info")
 info_col1, info_col2 = st.columns([1, 1])
 with info_col1:
     panel_name_input = st.text_input("Panel Name", value="")
-    client_name_input = st.text_input("Client Name (To:)", value="")
+    client_name_input = st.text_input("Client Name", value="")
 with info_col2:
     project_type_input = st.text_input(
         "Project Type",
@@ -100,7 +109,8 @@ with info_col2:
 #
 # Appends a new row to the PR tracking file on disk. Reuses the Client
 # Name and Project Type fields above. The resulting PR number becomes
-# the default for the "PR Number" field used in the Excel export below.
+# the default for the "PR Number" field used in the Excel export and
+# Word proposal below.
 # ===========================================================================
 st.markdown("---")
 st.header("1. Add Entry to PR Tracking File")
@@ -147,84 +157,161 @@ st.markdown("---")
 st.header("2. Export to Excel")
 
 if not yolo_class_totals and not terminal_results:
-    st.warning("Nothing to export yet. Run Detection and/or Terminal calculation first.")
-    st.stop()
+    st.info("No detection/terminal results yet — you can still use Steps 1 and 3 below.")
 
-# Build the combined class_totals dict that goes into the Excel template.
-combined_totals = dict(yolo_class_totals)
-
+combined_totals = {}
 busbar_sizes_present = set()
-for row in terminal_results:
-    count = row["Count"]
-    if row["Terminal Size (mm²)"] == "—":
-        # This wire size needs a busbar instead of a terminal.
-        key = f"Busbar{row['Wire Size (mm²)']}mm²"
-        busbar_sizes_present.add(row["Wire Size (mm²)"])
+
+if yolo_class_totals or terminal_results:
+    # Build the combined class_totals dict that goes into the Excel template.
+    combined_totals = dict(yolo_class_totals)
+
+    for row in terminal_results:
+        count = row["Count"]
+        if row["Terminal Size (mm²)"] == "—":
+            # This wire size needs a busbar instead of a terminal.
+            key = f"Busbar{row['Wire Size (mm²)']}mm²"
+            busbar_sizes_present.add(row["Wire Size (mm²)"])
+        else:
+            key = f"Terminal{row['Terminal Size (mm²)']}mm²"
+        combined_totals[key] = combined_totals.get(key, 0) + count
+
+    if busbar_sizes_present:
+        st.warning(
+            "⚠️ The export below includes busbar line item(s) for wire size(s) "
+            + ", ".join(f"{s} mm²" for s in sorted(busbar_sizes_present))
+            + " that exceeded the terminal table range."
+        )
+
+    export_col1, export_col2 = st.columns([1, 1])
+    with export_col1:
+        template_file = st.file_uploader(
+            "Upload your Excel template (.xlsx)",
+            type=["xlsx"],
+            key="template_uploader",
+        )
+    with export_col2:
+        pr_number_input = st.text_input(
+            "PR Number (for DRAW NO)",
+            value=st.session_state.get("last_pr_number", ""),
+            help="Auto-filled after adding a PR entry above. You can also "
+                 "type a number in manually.",
+        )
+
+        page_number_input = 1
+        if template_file is not None:
+            try:
+                total_pages = count_pages_in_template(template_file)
+                template_file.seek(0)  # reset read position after inspecting it
+                page_number_input = st.number_input(
+                    f"Page Number (this template has {total_pages} page(s))",
+                    min_value=1,
+                    max_value=total_pages,
+                    value=1,
+                    step=1,
+                )
+            except Exception as e:
+                st.error(f"Could not read the template's page count: {e}")
+
+    draw_no_input = ""
+    if pr_number_input.strip():
+        draw_no_input = f"DRAW NO: {today_jalali_year()}-{pr_number_input.strip()}"
+        st.caption(f"Will write **{draw_no_input}** into the template.")
+
+    if template_file is not None:
+        try:
+            template_file.seek(0)  # reset again since it was read above
+            excel_buffer = fill_template(
+                template_file,
+                combined_totals,
+                panel_name=panel_name_input,
+                date=date_input,
+                client_name=client_name_input,
+                draw_no=draw_no_input,
+                start_page=page_number_input,
+            )
+            st.download_button(
+                label="Download Filled Excel Report",
+                data=excel_buffer,
+                file_name="detection_report.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        except ValueError as e:
+            st.error(str(e))
     else:
-        key = f"Terminal{row['Terminal Size (mm²)']}mm²"
-    combined_totals[key] = combined_totals.get(key, 0) + count
-
-if busbar_sizes_present:
-    st.warning(
-        "⚠️ The export below includes busbar line item(s) for wire size(s) "
-        + ", ".join(f"{s} mm²" for s in sorted(busbar_sizes_present))
-        + " that exceeded the terminal table range."
-    )
-
-export_col1, export_col2 = st.columns([1, 1])
-with export_col1:
-    template_file = st.file_uploader(
-        "Upload your Excel template (.xlsx)",
-        type=["xlsx"],
-        key="template_uploader",
-    )
-with export_col2:
+        st.info("Upload your Excel template above to enable the export.")
+else:
+    # No detection/terminal data yet: still let the user type a PR number
+    # manually so Step 3 (Word proposal) below can use it.
     pr_number_input = st.text_input(
-        "PR Number (for DRAW NO)",
+        "PR Number",
         value=st.session_state.get("last_pr_number", ""),
         help="Auto-filled after adding a PR entry above. You can also "
              "type a number in manually.",
     )
 
-    page_number_input = 1
-    if template_file is not None:
-        try:
-            total_pages = count_pages_in_template(template_file)
-            template_file.seek(0)  # reset read position after inspecting it
-            page_number_input = st.number_input(
-                f"Page Number (this template has {total_pages} page(s))",
-                min_value=1,
-                max_value=total_pages,
-                value=1,
-                step=1,
-            )
-        except Exception as e:
-            st.error(f"Could not read the template's page count: {e}")
+# ===========================================================================
+# Step 3: Generate Word Proposal (TFP)
+#
+# Uses the Client Name / Project Type / Date / PR Number fields already
+# collected above, plus price and panel count read from a separately
+# uploaded "panel price" Excel file (see panel_price.py — it currently
+# reads placeholder cells B2/B3; update those to the real cell addresses
+# once confirmed).
+# ===========================================================================
+st.markdown("---")
+st.header("3. Generate Word Proposal (TFP)")
+st.caption(
+    "Fills the Word template's {{ price }}, {{ price_text }}, {{ date }}, "
+    "{{ PR }}, {{ client_name }} and {{ project_type }} fields using the "
+    "info above, plus price and panel count read from the panel price "
+    "Excel file."
+)
 
-draw_no_input = ""
-if pr_number_input.strip():
-    draw_no_input = f"DRAW NO: {today_jalali_year()}-{pr_number_input.strip()}"
-    st.caption(f"Will write **{draw_no_input}** into the template.")
+tfp_col1, tfp_col2 = st.columns([1, 1])
+with tfp_col1:
+    word_template_file = st.file_uploader(
+        "Upload your Word template (.docx)",
+        type=["docx"],
+        key="word_template_uploader",
+    )
+with tfp_col2:
+    panel_price_file = st.file_uploader(
+        "Upload the Panel Price Excel file (.xlsx)",
+        type=["xlsx"],
+        key="panel_price_uploader",
+    )
 
-if template_file is not None:
+if word_template_file is not None and panel_price_file is not None:
     try:
-        template_file.seek(0)  # reset again since it was read above
-        excel_buffer = fill_template(
-            template_file,
-            combined_totals,
-            panel_name=panel_name_input,
-            date=date_input,
-            client_name=client_name_input,
-            draw_no=draw_no_input,
-            start_page=page_number_input,
-        )
-        st.download_button(
-            label="Download Filled Excel Report",
-            data=excel_buffer,
-            file_name="detection_report.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+        price, panel_count = read_panel_price(panel_price_file)
+        st.caption(f"Read from panel price file: price = {price:,}, panel count = {panel_count}")
+
+        if not pr_number_input.strip():
+            st.warning("Please fill in the PR Number field above first (or add a PR entry in Step 1).")
+        elif not client_name_input:
+            st.warning("Please fill in the Client Name field above first.")
+        elif not project_type_input:
+            st.warning("Please fill in the Project Type field above first.")
+        else:
+            word_buffer = generate_proposal(
+                word_template_file,
+                price=price,
+                panel_count=panel_count,
+                pr_number=pr_number_input.strip(),
+                client_name=client_name_input,
+                project_type=project_type_input,
+                date_str=date_input,
+            )
+            st.download_button(
+                label="Download Word Proposal",
+                data=word_buffer,
+                file_name="TFP.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
     except ValueError as e:
         st.error(str(e))
+    except Exception as e:
+        st.error(f"Could not generate the Word proposal: {e}")
 else:
-    st.info("Upload your Excel template above to enable the export.")
+    st.info("Upload both the Word template and the panel price Excel file above to enable generation.")
