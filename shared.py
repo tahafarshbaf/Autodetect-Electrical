@@ -4,6 +4,7 @@ helpers, and the shared UI theme/header for the multi-page Streamlit app.
 """
 
 import base64
+import hashlib
 import os
 
 import streamlit as st
@@ -12,10 +13,7 @@ from ultralytics import YOLO
 from persiantools.jdatetime import JalaliDate
 
 from cable_ocr import build_ocr_engine
-
-LOGO_PATH = r"C:\Users\Azar Fonoon\Desktop\farshbaf\logo.png"
-MODEL_PATH = r"C:\Users\Azar Fonoon\Downloads\best.pt"
-PR_FILE_PATH = r"C:\Users\Azar Fonoon\Desktop\PR - 1405.xlsx"
+from config import LOGO_PATH, MODEL_PATH, PR_FILE_PATH
 
 
 # ---------------------------------------------------------------------------
@@ -70,12 +68,30 @@ def load_cable_ocr_engine():
     return build_ocr_engine()
 
 
-@st.cache_data(show_spinner=False)
-def _run_detection_cached(image_bytes: bytes, size, mode: str, threshold: float):
-    model = load_model()
-    image = Image.frombytes(mode, size, image_bytes)
-    results = model.predict(image, conf=threshold, verbose=False)
-    result = results[0]
+# ---------------------------------------------------------------------------
+# Detection results cache.
+#
+# A plain process-wide dict instead of @st.cache_data: caching needs to
+# work per-image (so an unchanged image is never re-run), but the actual
+# inference call needs to happen once for a whole BATCH of images at a
+# time (so the model processes them together instead of one-by-one). A
+# single @st.cache_data-wrapped function can't do both at once, since
+# its cache key would have to be the whole batch, which misses the cache
+# entirely the moment even one new image is added to the batch.
+# ---------------------------------------------------------------------------
+_detection_cache: dict = {}
+
+
+def _image_cache_key(image: Image.Image, threshold: float):
+    """Content-based cache key: same image bytes + same threshold ->
+    same key, regardless of which upload/session produced the image."""
+    rgb_bytes = image.tobytes()
+    digest = hashlib.sha256(rgb_bytes).hexdigest()
+    return (digest, image.size, threshold)
+
+
+def _process_result(model, result):
+    """Turns one ultralytics Result object into (annotated_image, detections)."""
     result_array = result.plot()[:, :, ::-1]
     result_image = Image.fromarray(result_array)
 
@@ -95,11 +111,56 @@ def _run_detection_cached(image_bytes: bytes, size, mode: str, threshold: float)
     return result_image, detections
 
 
+def run_detection_batch(images: list, threshold: float):
+    """
+    Runs YOLO inference on a list of PIL images in ONE batched
+    model.predict() call, instead of looping and calling predict() once
+    per image.
+
+    This matters most on a GPU (and still helps some on CPU): the model
+    processes the whole batch together rather than paying per-call
+    overhead N times over, so for a typical multi-image panel upload
+    this can noticeably cut total analysis time compared to calling
+    predict() image-by-image.
+
+    Images already analyzed at the same threshold are served straight
+    from an in-process cache and excluded from the batch entirely, so
+    re-running analysis on unchanged images stays instant and doesn't
+    waste a model call.
+
+    Args:
+        images: list of PIL.Image objects (any mode; converted to RGB).
+        threshold: confidence threshold, shared across the whole batch.
+
+    Returns:
+        List of (result_image, detections) tuples, in the same order as
+        the input `images` list.
+    """
+    model = load_model()
+
+    # Normalize once up front so hashing and inference both see the same
+    # RGB representation of each image.
+    rgb_images = [img.convert("RGB") for img in images]
+    cache_keys = [_image_cache_key(img, threshold) for img in rgb_images]
+
+    pending_indices = [i for i, key in enumerate(cache_keys) if key not in _detection_cache]
+
+    if pending_indices:
+        pending_images = [rgb_images[i] for i in pending_indices]
+        # The actual batching happens here: passing a list to predict()
+        # runs it as one batched forward pass instead of N separate calls.
+        pending_results = model.predict(pending_images, conf=threshold, verbose=False)
+
+        for i, result in zip(pending_indices, pending_results):
+            _detection_cache[cache_keys[i]] = _process_result(model, result)
+
+    return [_detection_cache[key] for key in cache_keys]
+
+
 def run_detection(image: Image.Image, threshold: float):
-    rgb_image = image.convert("RGB")
-    return _run_detection_cached(
-        rgb_image.tobytes(), rgb_image.size, rgb_image.mode, threshold
-    )
+    """Single-image convenience wrapper around run_detection_batch(), for
+    any call site that only has one image on hand at a time."""
+    return run_detection_batch([image], threshold)[0]
 
 
 def get_clipboard_image():

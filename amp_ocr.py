@@ -69,12 +69,24 @@ def parse_amperage(text: str):
     return match.group(1) if match else None
 
 
-def extract_amperage_near_box(image: Image.Image, box, ocr_engine, margin_ratio: float = 0.6):
+def extract_amperage_near_box(image: Image.Image, box, ocr_engine, margin_ratio: float = 0.6,
+                               min_confidence: float = 0.5):
     """
     Expands the given box by margin_ratio in all directions (plus a
     minimum absolute pixel padding — see expand_box()), runs OCR on the
     expanded crop, and returns the best-guess amperage string (e.g.
-    "63"), or None if no number was recognized.
+    "63"), or None if no number was recognized with enough confidence.
+
+    Candidate numbers are ranked by a combination of OCR confidence AND
+    physical distance from the actual detected element within the crop
+    — not confidence alone. On a densely-packed panel, a neighboring
+    element's rating often sits well inside the expanded crop too, and
+    can easily have a *higher* raw OCR confidence than the real target's
+    number (better lighting, less overlap, clearer font). Weighting by
+    proximity makes the reading actually attached to this element win
+    even when a neighbor's text was read more "confidently" - this is
+    the main source of readings getting attached to the wrong element
+    when many detections are OCR'd together.
 
     Args:
         image: the full original PIL image the detection came from.
@@ -84,6 +96,14 @@ def extract_amperage_near_box(image: Image.Image, box, ocr_engine, margin_ratio:
                       in every direction. Increase this if the number is
                       often missed; decrease it if a neighboring
                       element's number gets picked up by mistake.
+        min_confidence: minimum RAW OCR confidence (0-1) the winning
+                         candidate must have to be accepted at all. Below
+                         this, None is returned instead of a guess - a
+                         blank amperage the user fills in by hand is
+                         safer than a wrong one, since a wrong reading
+                         silently splits what should be one equipment
+                         count into multiple "different" BOQ line items
+                         (see build_class_key).
 
     Returns:
         The recognized amperage value as a string (e.g. "63"), or None.
@@ -96,24 +116,67 @@ def extract_amperage_near_box(image: Image.Image, box, ocr_engine, margin_ratio:
     prepped = prep_crop_for_ocr(crop)
     crop_np = np.array(prepped.convert("RGB"))
 
+    # Where the actual YOLO box sits within this crop, in the SAME
+    # upscaled coordinate space prep_crop_for_ocr() produced - used below
+    # to measure how close each candidate text is to the real element,
+    # rather than trusting OCR confidence alone.
+    upscale_x = prepped.width / crop.width
+    upscale_y = prepped.height / crop.height
+    ex1, ey1, ex2, ey2 = crop_box
+    x1, y1, x2, y2 = box
+    target_center = (
+        (x1 - ex1 + (x2 - x1) / 2) * upscale_x,
+        (y1 - ey1 + (y2 - y1) / 2) * upscale_y,
+    )
+    crop_diagonal = (prepped.width ** 2 + prepped.height ** 2) ** 0.5
+
     results = ocr_engine.predict(crop_np)
     candidates = []
     for res in results:
-        for text, score in zip(res["rec_texts"], res["rec_scores"]):
+        texts = res["rec_texts"]
+        scores = res["rec_scores"]
+        # rec_boxes: array of [x_min, y_min, x_max, y_max] per recognized
+        # text, same order as rec_texts/rec_scores. Older PaddleOCR
+        # builds may not include it - degrade gracefully to
+        # confidence-only ranking (the previous behavior) if so.
+        boxes = res.get("rec_boxes")
+
+        for i, (text, score) in enumerate(zip(texts, scores)):
             value = parse_amperage(text)
-            if value is not None:
-                candidates.append((value, score))
+            if value is None:
+                continue
+
+            if boxes is not None and i < len(boxes):
+                bx1, by1, bx2, by2 = boxes[i]
+                text_center = ((bx1 + bx2) / 2, (by1 + by2) / 2)
+                distance = (
+                    (text_center[0] - target_center[0]) ** 2
+                    + (text_center[1] - target_center[1]) ** 2
+                ) ** 0.5
+                proximity = max(0.0, 1 - distance / crop_diagonal)
+                ranking_score = score * proximity
+            else:
+                ranking_score = score
+
+            candidates.append({"value": value, "raw_score": score, "ranking_score": ranking_score})
 
     if not candidates:
         return None
 
-    # If several numbers were found in the expanded crop (e.g. a
-    # neighboring element's rating), keep the most confident one.
-    candidates.sort(key=lambda c: c[1], reverse=True)
-    return candidates[0][0]
+    # Proximity decides which candidate wins when several numbers are in
+    # the crop, but acceptance is judged on that winner's RAW OCR
+    # confidence - a nearby-but-illegible reading shouldn't be accepted
+    # just because nothing else was closer.
+    candidates.sort(key=lambda c: c["ranking_score"], reverse=True)
+    best = candidates[0]
+    if best["raw_score"] < min_confidence:
+        return None
+
+    return best["value"]
 
 
-def extract_amperages_for_detections(image: Image.Image, detections: list, ocr_engine, margin_ratio: float = 0.6):
+def extract_amperages_for_detections(image: Image.Image, detections: list, ocr_engine, margin_ratio: float = 0.6,
+                                      min_confidence: float = 0.5):
     """
     Runs extract_amperage_near_box() for every detection in `detections`
     (each dict must have a "box" key: (x1, y1, x2, y2)) and returns a new
@@ -121,7 +184,9 @@ def extract_amperages_for_detections(image: Image.Image, detections: list, ocr_e
     """
     enriched = []
     for detection in detections:
-        amperage = extract_amperage_near_box(image, detection["box"], ocr_engine, margin_ratio)
+        amperage = extract_amperage_near_box(
+            image, detection["box"], ocr_engine, margin_ratio, min_confidence
+        )
         enriched.append({**detection, "amperage": amperage})
     return enriched
 
