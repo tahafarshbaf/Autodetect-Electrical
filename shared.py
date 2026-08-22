@@ -83,7 +83,14 @@ def _run_detection_cached(image_bytes: bytes, size, mode: str, threshold: float)
     for box in result.boxes:
         cls_id = int(box.cls[0])
         conf = float(box.conf[0])
-        detections.append({"class": model.names[cls_id], "confidence": conf})
+        # Pixel-space box coordinates, needed by amp_ocr.py to crop the
+        # area around each element and OCR the amperage written near it.
+        x1, y1, x2, y2 = [float(v) for v in box.xyxy[0]]
+        detections.append({
+            "class": model.names[cls_id],
+            "confidence": conf,
+            "box": (x1, y1, x2, y2),
+        })
 
     return result_image, detections
 

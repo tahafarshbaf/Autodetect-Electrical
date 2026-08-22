@@ -6,7 +6,8 @@ import pandas as pd
 import streamlit as st
 from PIL import Image
 
-from shared import load_model, run_detection, get_clipboard_image, render_header
+from amp_ocr import extract_amperages_for_detections, build_class_key
+from shared import load_model, run_detection, get_clipboard_image, render_header, load_cable_ocr_engine
 
 render_header("AI-powered detection, counting and review of electrical equipment")
 
@@ -18,6 +19,23 @@ with st.sidebar:
         "Confidence threshold", 0.0, 1.0, 0.25, 0.05,
         help="Higher values reduce low-confidence detections."
     )
+    st.divider()
+    read_amperage = st.checkbox(
+        "Also read amperage near each element (OCR)",
+        value=False,
+        help="Slower — runs OCR on the area around every detected box to "
+             "read the amperage rating written next to it.",
+    )
+    amperage_margin_ratio = 0.6
+    if read_amperage:
+        amperage_margin_ratio = st.slider(
+            "Amperage search radius (relative to box size)",
+            0.1, 2.0, 0.6, 0.1,
+            help="How far around each detected box to look for the "
+                 "amperage number. Increase if numbers are being missed; "
+                 "decrease if a neighboring element's number gets picked "
+                 "up by mistake.",
+        )
     st.divider()
     st.metric("Model classes", len(model.names))
     st.caption("YOLO inference runs locally with the configured model.")
@@ -80,12 +98,20 @@ if st.button("Analyze panel images", type="primary", use_container_width=True):
     progress = st.progress(0, text="Preparing YOLO analysis...")
     all_results = []
 
+    ocr_engine = load_cable_ocr_engine() if read_amperage else None
+
     for idx, item in enumerate(images_to_process):
         progress.progress(
             idx / len(images_to_process),
             text=f"Analyzing {item['name']} ({idx + 1}/{len(images_to_process)})...",
         )
         result_image, detections = run_detection(item["image"], confidence_threshold)
+
+        if read_amperage:
+            detections = extract_amperages_for_detections(
+                item["image"], detections, ocr_engine, margin_ratio=amperage_margin_ratio
+            )
+
         all_results.append({
             "name": item["name"],
             "image": item["image"],
@@ -115,15 +141,36 @@ for idx, item in enumerate(results):
         with result_col:
             st.image(item["result_image"], caption="AI detection", use_container_width=True)
 
+        # Amperage is per-instance (each physical element can carry a
+        # different rating), so whenever amperage data is available for
+        # this image, group counts by (class, amperage) instead of by
+        # class alone.
+        has_amperage_data = any("amperage" in d for d in item["detections"])
+
         initial_counts = {}
         for detection in item["detections"]:
             cls = detection["class"]
-            initial_counts[cls] = initial_counts.get(cls, 0) + 1
+            amperage = (detection.get("amperage") or "") if has_amperage_data else ""
+            key = (cls, amperage)
+            initial_counts[key] = initial_counts.get(key, 0) + 1
 
-        initial_df = pd.DataFrame(
-            [{"Class": cls, "Count": count} for cls, count in sorted(initial_counts.items(), key=lambda x: -x[1])],
-            columns=["Class", "Count"],
-        )
+        if has_amperage_data:
+            initial_df = pd.DataFrame(
+                [
+                    {"Class": cls, "Amperage": amperage, "Count": count}
+                    for (cls, amperage), count in sorted(initial_counts.items(), key=lambda x: -x[1])
+                ],
+                columns=["Class", "Amperage", "Count"],
+            )
+        else:
+            initial_df = pd.DataFrame(
+                [
+                    {"Class": cls, "Count": count}
+                    for (cls, _amperage), count in sorted(initial_counts.items(), key=lambda x: -x[1])
+                ],
+                columns=["Class", "Count"],
+            )
+
         editor_key = f"editor_{idx}_{item['name']}"
 
         edit_col, action_col = st.columns([4, 1])
@@ -134,23 +181,31 @@ for idx, item in enumerate(results):
                 st.session_state.pop(editor_key, None)
                 st.rerun()
 
+        column_config = {
+            "Class": st.column_config.TextColumn("Equipment", required=True),
+            "Count": st.column_config.NumberColumn("Quantity", min_value=0, step=1, required=True),
+        }
+        if has_amperage_data:
+            column_config["Amperage"] = st.column_config.TextColumn(
+                "Amperage", help="Leave blank if the rating wasn't read correctly."
+            )
+
         edited_df = st.data_editor(
             initial_df,
             key=editor_key,
             num_rows="dynamic",
             use_container_width=True,
-            column_config={
-                "Class": st.column_config.TextColumn("Equipment", required=True),
-                "Count": st.column_config.NumberColumn("Quantity", min_value=0, step=1, required=True),
-            },
+            column_config=column_config,
         )
 
         image_counts = {}
         for _, row in edited_df.iterrows():
             cls = str(row.get("Class", "")).strip()
             count = row.get("Count", 0)
+            amperage = str(row.get("Amperage", "") or "").strip() if has_amperage_data else ""
             if cls and pd.notna(count) and count > 0:
-                image_counts[cls] = image_counts.get(cls, 0) + int(count)
+                key = build_class_key(cls, amperage)
+                image_counts[key] = image_counts.get(key, 0) + int(count)
         edited_counts_per_image.append(image_counts)
 
         buffer = io.BytesIO()

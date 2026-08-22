@@ -12,6 +12,8 @@ import re
 from io import BytesIO
 import openpyxl
 
+from amp_ocr import AMPERAGE_KEY_SEPARATOR
+
 # ---------------------------------------------------------------------------
 # Template layout constants
 # Adjust these if the template structure ever changes.
@@ -53,23 +55,44 @@ CLASS_PRIORITY_ORDER = [
 # digit onward as the spec, e.g. "MCB1P" -> ("MCB", "1P").
 _CLASS_NAME_PATTERN = re.compile(r"^([^\d]+)(\d.*)$")
 
+# Matches an amperage suffix appended by the Detection page's OCR step,
+# e.g. "MCB3P__63A" -> ("MCB3P", "63A"). See amp_ocr.build_class_key().
+_AMPERAGE_SUFFIX_PATTERN = re.compile(
+    rf"^(.*){re.escape(AMPERAGE_KEY_SEPARATOR)}(\d+(?:\.\d+)?A)$"
+)
+
 
 def split_class_name(class_name: str):
     """
     Splits a YOLO class name into (element_name, spec), where everything
     before the first digit is the element name and the first digit
-    onward is the spec.
+    onward is the spec. Also decodes an optional amperage suffix added
+    by the Detection page's OCR step (see amp_ocr.build_class_key()),
+    appending the amperage to the spec so it ends up in the same "Range"
+    column of the BOQ template.
 
     Examples:
         "MCB1P"       -> ("MCB", "1P")
         "Contactor3P" -> ("Contactor", "3P")
-        "Relay"       -> ("Relay", "")   # no digit found
+        "Relay"       -> ("Relay", "")            # no digit found
+        "MCB3P__63A"  -> ("MCB", "3P 63A")         # amperage from OCR
+        "Relay__12A"  -> ("Relay", "12A")
     """
+    amperage_suffix = None
+    amperage_match = _AMPERAGE_SUFFIX_PATTERN.match(class_name)
+    if amperage_match:
+        class_name, amperage_suffix = amperage_match.group(1), amperage_match.group(2)
+
     match = _CLASS_NAME_PATTERN.match(class_name)
     if match:
-        name, spec = match.group(1), match.group(2)
-        return name.strip(), spec.strip()
-    return class_name, ""
+        name, spec = match.group(1).strip(), match.group(2).strip()
+    else:
+        name, spec = class_name, ""
+
+    if amperage_suffix:
+        spec = f"{spec} {amperage_suffix}".strip()
+
+    return name, spec
 
 
 def _priority_sort_key(class_name: str):
