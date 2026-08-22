@@ -28,6 +28,10 @@ def generate_proposal(
     client_name: str,
     project_type: str,
     date_str: str,
+    panel_color: str = "",
+    indicator_code: str = "",
+    delivery_time: str = "",
+    delivery_location: str = "",
 ):
     """
     Fills the Word proposal template with the given values and returns
@@ -45,6 +49,15 @@ def generate_proposal(
         project_type: project type text, goes into {{ project_type }}.
         date_str: pre-formatted Jalali date string, e.g. "1405/05/26"
                    (matches the "Date" field already on the Export page).
+        panel_color: panel color text (e.g. "RAL 7035"), goes into
+                     {{ panel_color }}.
+        indicator_code: indicator code text, goes into
+                        {{ indicator_code }}.
+        delivery_time: delivery time text (e.g. "30 روز کاری"), goes
+                       into {{ delivery_time }}.
+        delivery_location: delivery location text (e.g. factory
+                            warehouse address), goes into
+                            {{ delivery_location }}.
 
     Returns:
         BytesIO object containing the filled .docx file, ready for
@@ -66,6 +79,10 @@ def generate_proposal(
         "client_name": client_name,
         "project_type": project_type,
         "panel_count": panel_count,
+        "panel_color": panel_color,
+        "indicator_code": indicator_code,
+        "delivery_time": delivery_time,
+        "delivery_location": delivery_location,
     }
     doc.render(context)
 

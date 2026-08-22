@@ -22,6 +22,7 @@ BLOCK_HEIGHT = 41          # rows between the start of one block and the next
 DATA_ROWS_PER_BLOCK = 30   # element rows available per block
 HEADER_OFFSET = 4          # column header row is 4 rows after block start
 DATA_START_OFFSET = 5      # first data row is 5 rows after block start
+DRAW_NO_ROW_OFFSET = 2     # DRAW NO row is 2 rows after each block's start row
 
 COL_DESCRIPTION = 2   # column B — element name
 COL_RANGE = 3         # column C — specification (e.g. 3-Pole / 1-Pole)
@@ -49,6 +50,21 @@ CLASS_PRIORITY_ORDER = [
     "Relay",
     "Fuse",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Fixed trailing rows.
+#
+# These are always appended as the LAST rows of the export, in this exact
+# order, regardless of what was detected/calculated elsewhere (Detection
+# page, Terminal page). Their quantity is left blank so it can be filled
+# in by hand afterwards. They're independent from the "Busbar<size>mm²"
+# rows the Terminal page may add (those come from the wire/terminal size
+# calculation and aren't related to this fixed "Busbar" line item).
+#
+# Edit this list if the set/order of fixed rows ever needs to change.
+# ---------------------------------------------------------------------------
+FIXED_TRAILING_ITEMS = ["Wire", "Cubicle", "Busbar", "Installation"]
 
 
 # Matches everything before the first digit as the name, and the first
@@ -164,13 +180,19 @@ def fill_template(
         client_name: optional text to write into the "To: Client" field
                      (the "به: شركت" field in the template).
         draw_no: optional text (e.g. "DRAW NO: 1405-92") to write into
-                 the fixed cell B3 — written once per file, not
-                 per-panel-block like panel_name/date/client_name.
+                 the DRAW NO row of the block for start_page (i.e. the
+                 same page panel_name/date/client_name are written to —
+                 NOT a fixed absolute cell).
         start_page: which page (1-indexed) to start writing into. Page 1 is
                     the first block (rows 1-41), page 2 is the second
                     (rows 42-82), and so on. If there are more element
                     types than fit on one page, writing continues onto
                     the following page(s).
+
+    The rows in FIXED_TRAILING_ITEMS (Wire, Cubicle, Busbar, Installation)
+    are always appended as the last rows of the export, in that exact
+    order, with a blank quantity for manual entry afterwards — regardless
+    of what class_totals contains.
 
     Returns:
         A BytesIO object containing the filled .xlsx file, ready for download.
@@ -184,14 +206,13 @@ def fill_template(
     ws = wb.active
     merge_anchor_map = _build_merge_anchor_map(ws)
 
-    # DRAW NO is written once, into the fixed cell B3 — it isn't part of
-    # the repeating per-panel block, unlike panel_name/date/client_name.
-    if draw_no:
-        _writable_cell(ws, 3, 2, merge_anchor_map).value = draw_no
-
     # Sort by the priority list defined above (CLASS_PRIORITY_ORDER), not by
     # detection order or count.
     items = sorted(class_totals.items(), key=lambda x: _priority_sort_key(x[0]))
+
+    # Always append the fixed trailing rows (blank quantity) at the very
+    # end, after everything else, in FIXED_TRAILING_ITEMS's exact order.
+    items = items + [(name, None) for name in FIXED_TRAILING_ITEMS]
 
     total_pages_available = count_available_blocks(ws)
 
@@ -208,11 +229,19 @@ def fill_template(
     if last_page_used > total_pages_available:
         raise ValueError(
             f"Not enough pages left in the template: {len(items)} element types "
+            f"(including the {len(FIXED_TRAILING_ITEMS)} fixed trailing rows) "
             f"need {pages_needed} page(s) of {DATA_ROWS_PER_BLOCK} rows each, "
             f"starting from page {start_page} that would require pages up to "
             f"{last_page_used}, but the template only has {total_pages_available} "
             f"page(s) in total."
         )
+
+    # DRAW NO is written once per file, into the DRAW NO row of the block
+    # for start_page — i.e. the same page the rest of the header info
+    # (panel_name/date/client_name) is written to.
+    if draw_no:
+        draw_no_row = block_start_row(start_page) + DRAW_NO_ROW_OFFSET
+        _writable_cell(ws, draw_no_row, 2, merge_anchor_map).value = draw_no
 
     item_index = 0
     for page_offset in range(pages_needed):
@@ -237,6 +266,9 @@ def fill_template(
             row = data_start_row + row_offset
             _writable_cell(ws, row, COL_DESCRIPTION, merge_anchor_map).value = element_name
             _writable_cell(ws, row, COL_RANGE, merge_anchor_map).value = spec
+            # count is None for the fixed trailing rows (Wire, Cubicle,
+            # Busbar, Installation) so their quantity cell is left blank
+            # for manual entry.
             _writable_cell(ws, row, COL_QTY, merge_anchor_map).value = count
 
             item_index += 1

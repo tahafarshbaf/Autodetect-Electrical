@@ -16,8 +16,9 @@ Three connected actions:
 3. Generate Word Proposal (TFP) — fills a Word proposal template
    (uploaded fresh from the UI, like the Excel template) using
    docxtpl, reusing the Client Name / Project Type / Date / PR Number
-   fields already collected above, plus a price and panel count read
-   from a separately-uploaded "panel price" Excel file
+   fields already collected above, plus Panel Color / Indicator Code /
+   Delivery Time / Delivery Location, plus a price and panel count
+   read from a separately-uploaded "panel price" Excel file
    (panel_price.py).
 
 Terminal results are merged into the same class_totals dict that
@@ -80,6 +81,15 @@ info_col1, info_col2 = st.columns([1, 1])
 with info_col1:
     panel_name_input = st.text_input("Panel Name", value="")
     client_name_input = st.text_input("Client Name", value="")
+    panel_color_input = st.text_input(
+        "Panel Color",
+        value="RAL 7032",
+        help="Defaults to RAL 7032 since most projects use this color. "
+    )
+    indicator_code_input = st.text_input(
+        "Indicator Code",
+        value="",
+    )
 with info_col2:
     project_type_input = st.text_input(
         "Project Type",
@@ -103,6 +113,21 @@ with info_col2:
 
     date_input = st.text_input("Date", key="date_input_value")
     st.button("Fill Today's Date (Shamsi)", on_click=_set_today_jalali_date)
+
+    delivery_time_input = st.text_input(
+        "Delivery Time",
+        value="",
+    )
+    delivery_location_input = st.text_area(
+        "Delivery Location",
+        value=(
+            "انبار كارخانه اين شركت واقع در جاده آذر شهر- شهرك صنعتي"
+            "سليمي – خيابان 45 متري اصلي – انتهاي 30 متري چهارم شمالي"
+        ),
+        help="Defaults to the company factory warehouse address since "
+             "most projects deliver there. Change it if this project "
+             "needs a different delivery location.",
+    )
 
 # ===========================================================================
 # Step 1: Add Entry to PR Tracking File
@@ -253,7 +278,8 @@ else:
 # ===========================================================================
 # Step 3: Generate Word Proposal (TFP)
 #
-# Uses the Client Name / Project Type / Date / PR Number fields already
+# Uses the Client Name / Project Type / Date / PR Number / Panel Color /
+# Indicator Code / Delivery Time / Delivery Location fields already
 # collected above, plus price and panel count read from a separately
 # uploaded "panel price" Excel file (see panel_price.py — it currently
 # reads placeholder cells B2/B3; update those to the real cell addresses
@@ -263,9 +289,10 @@ st.markdown("---")
 st.header("3. Generate Word Proposal (TFP)")
 st.caption(
     "Fills the Word template's {{ price }}, {{ price_text }}, {{ date }}, "
-    "{{ PR }}, {{ client_name }} and {{ project_type }} fields using the "
-    "info above, plus price and panel count read from the panel price "
-    "Excel file."
+    "{{ PR }}, {{ client_name }}, {{ project_type }}, {{ panel_color }}, "
+    "{{ indicator_code }}, {{ delivery_time }} and {{ delivery_location }} "
+    "fields using the info above, plus price and panel count read from the "
+    "panel price Excel file."
 )
 
 tfp_col1, tfp_col2 = st.columns([1, 1])
@@ -302,6 +329,10 @@ if word_template_file is not None and panel_price_file is not None:
                 client_name=client_name_input,
                 project_type=project_type_input,
                 date_str=date_input,
+                panel_color=panel_color_input,
+                indicator_code=indicator_code_input,
+                delivery_time=delivery_time_input,
+                delivery_location=delivery_location_input,
             )
             st.download_button(
                 label="Download Word Proposal",
